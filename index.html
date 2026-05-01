@@ -1,0 +1,1594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gitleaks Viewer · Local-only triage</title>
+<script>
+  // Pre-paint theme application (no FOUC)
+  (function() {
+    try {
+      var t = localStorage.getItem('gitleaks_viewer_theme_v1');
+      if (t !== 'light' && t !== 'dark') {
+        t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+      }
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch(e) {}
+  })();
+</script>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --bg-elev: #121821;
+    --bg-elev-2: #18202b;
+    --border: #1f2a37;
+    --border-strong: #2a3a4f;
+    --text: #e6edf3;
+    --text-dim: #8b97a8;
+    --text-faint: #5a6577;
+    --accent: #4ade80;
+    --accent-dim: #16a34a;
+    --danger: #f87171;
+    --danger-bg: #2a1518;
+    --warn: #fbbf24;
+    --info: #60a5fa;
+    --done: #22c55e;
+    --testing: #a78bfa;
+    --code-bg: #06090d;
+    --hover-overlay: rgba(255,255,255,0.03);
+    --row-hover: rgba(255,255,255,0.02);
+    --shadow-glow: 0 0 20px rgba(74,222,128,0.25);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html[data-theme="light"] {
+    --bg: #f7f8fa;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #f1f3f6;
+    --border: #e2e6eb;
+    --border-strong: #cbd2db;
+    --text: #1a2230;
+    --text-dim: #5a6677;
+    --text-faint: #8a96a8;
+    --accent: #15803d;
+    --accent-dim: #16a34a;
+    --danger: #dc2626;
+    --danger-bg: #fef2f2;
+    --warn: #d97706;
+    --info: #1d4ed8;
+    --done: #15803d;
+    --testing: #6d28d9;
+    --code-bg: #f4f6f9;
+    --hover-overlay: rgba(0,0,0,0.04);
+    --row-hover: rgba(0,0,0,0.02);
+    --shadow-glow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    transition: background 0.2s, color 0.2s;
+  }
+  a { color: var(--info); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono { font-family: var(--mono); font-size: 12.5px; }
+
+  /* Layout */
+  .wrap { max-width: 1600px; margin: 0 auto; padding: 24px; }
+  header.top {
+    display: flex; align-items: center; gap: 14px;
+    padding-bottom: 18px; border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .logo {
+    width: 38px; height: 38px; border-radius: 8px;
+    background: linear-gradient(135deg, #16a34a, #065f46);
+    display: grid; place-items: center;
+    box-shadow: var(--shadow-glow);
+    flex-shrink: 0;
+  }
+  .logo svg { width: 22px; height: 22px; }
+  .title h1 { margin: 0; font-size: 18px; letter-spacing: 0.2px; }
+  .title p { margin: 2px 0 0; color: var(--text-dim); font-size: 12.5px; }
+
+  .header-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* Tab bar (header-mounted) */
+  .tab-bar {
+    display: inline-flex;
+    gap: 2px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 3px;
+  }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 7px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .tab-btn:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--hover-overlay);
+  }
+  .tab-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .tab-btn.active {
+    background: var(--bg-elev-2);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+  .tab-btn svg { width: 14px; height: 14px; }
+  .tab-btn .tab-count {
+    background: var(--bg);
+    color: var(--text-dim);
+    font-size: 10.5px;
+    padding: 1px 6px;
+    border-radius: 9px;
+    font-weight: 600;
+  }
+  .tab-btn.active .tab-count { color: var(--accent); }
+  .tab-btn .tab-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  /* Theme toggle */
+  .theme-toggle {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .theme-toggle:hover {
+    color: var(--text);
+    background: var(--bg-elev-2);
+    border-color: var(--border-strong);
+  }
+  .theme-toggle svg { width: 16px; height: 16px; }
+  .theme-toggle .icon-sun { display: none; }
+  .theme-toggle .icon-moon { display: block; }
+  html[data-theme="light"] .theme-toggle .icon-sun { display: block; }
+  html[data-theme="light"] .theme-toggle .icon-moon { display: none; }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; animation: fadeIn 0.18s ease; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .tab-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .tab-btn:disabled:hover { background: transparent; color: var(--text-dim); }
+
+  /* Howto card */
+  .howto {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+  }
+  .howto h3 { color: var(--text); }
+  .howto-body { color: var(--text-dim); }
+  .howto-body p { margin: 8px 0; }
+  .howto-body pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-family: var(--mono); font-size: 12.5px;
+    color: #c9d1d9;
+    margin: 8px 0;
+  }
+  html[data-theme="light"] .howto-body pre { color: #1a2230; }
+  .howto-body .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .howto-body .links a {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    padding: 5px 10px; border-radius: 6px;
+    font-size: 12.5px;
+    color: var(--info);
+  }
+  .howto-body .links a:hover { background: var(--bg-elev-2); text-decoration: none; }
+
+  /* Input area */
+  .input-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  .input-card-body {
+    padding: 16px 18px;
+  }
+  .input-row {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .input-row .label { font-weight: 600; }
+  .btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 7px 14px; border-radius: 6px;
+    font-size: 13px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn:hover { background: var(--bg-elev-2); border-color: var(--border-strong); }
+  html:not([data-theme="light"]) .btn:hover { background: #1f2a37; border-color: #3a4a5f; }
+  .btn-primary {
+    background: var(--accent-dim); border-color: var(--accent-dim); color: #001;
+    font-weight: 600;
+  }
+  .btn-primary:hover { background: #15803d; border-color: #15803d; }
+  .btn-danger {
+    background: transparent; border-color: var(--danger);
+    color: var(--danger);
+  }
+  .btn-danger:hover { background: var(--danger-bg); }
+  .btn svg { width: 14px; height: 14px; }
+  textarea {
+    width: 100%; min-height: 130px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-family: var(--mono); font-size: 12px;
+    resize: vertical;
+  }
+  textarea:focus { outline: none; border-color: var(--accent-dim); }
+  .file-input { display: none; }
+  .parse-msg { font-size: 12.5px; margin-top: 8px; }
+  .parse-msg.err { color: var(--danger); }
+  .parse-msg.ok { color: var(--accent); }
+
+  /* Stats */
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .stat {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    min-width: 120px;
+  }
+  .stat .num { font-size: 22px; font-weight: 600; }
+  .stat .lbl { font-size: 11.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat.danger .num { color: var(--danger); }
+  .stat.done .num { color: var(--done); }
+  .stat.testing .num { color: var(--testing); }
+
+  /* Filters */
+  .filters {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  }
+  .filters input[type="text"], .filters select {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .filters input[type="text"]:focus, .filters select:focus {
+    outline: none; border-color: var(--accent-dim);
+  }
+  .filters input[type="text"] { min-width: 240px; }
+  .filters label.ck {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12.5px; color: var(--text-dim); cursor: pointer;
+    user-select: none;
+  }
+  .filters label.ck input { accent-color: var(--accent); }
+
+  /* Table */
+  .table-wrap {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: var(--bg-elev-2);
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border-strong);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { color: var(--text); }
+  thead th .sort-ind { color: var(--text-faint); margin-left: 4px; }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr.done { opacity: 0.45; }
+  tbody tr.done td.col-secret { text-decoration: line-through; }
+  tbody tr.testing { background: rgba(167,139,250,0.04); }
+  tbody td {
+    padding: 11px 12px;
+    vertical-align: top;
+    font-size: 12.5px;
+  }
+  td.col-rule { white-space: nowrap; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--danger-bg);
+    color: var(--danger);
+    border: 1px solid rgba(248,113,113,0.3);
+    white-space: nowrap;
+  }
+  .pill.private-key { background: #2a0f0f; color: #fca5a5; border-color: rgba(252,165,165,0.3); }
+  .pill.curl-auth-header { background: #1a1f2e; color: var(--info); border-color: rgba(96,165,250,0.3); }
+  html[data-theme="light"] .pill { border-color: rgba(220,38,38,0.3); }
+  html[data-theme="light"] .pill.private-key { background: #fee2e2; color: #991b1b; border-color: rgba(153,27,27,0.25); }
+  html[data-theme="light"] .pill.curl-auth-header { background: #dbeafe; color: var(--info); border-color: rgba(29,78,216,0.25); }
+  td.col-file { max-width: 320px; word-break: break-all; }
+  td.col-file .file-path { color: var(--text); }
+  td.col-file .meta { color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+  td.col-secret { max-width: 280px; }
+  .secret-box {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 8px;
+    font-family: var(--mono); font-size: 11.5px;
+    max-width: 100%;
+  }
+  .secret-text {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 220px;
+  }
+  .secret-text.hidden { letter-spacing: 1px; }
+  .icon-btn {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--text-dim); padding: 2px;
+    display: inline-flex; align-items: center;
+  }
+  .icon-btn:hover { color: var(--text); }
+  .icon-btn svg { width: 14px; height: 14px; }
+  td.col-author { white-space: nowrap; }
+  td.col-author .name { color: var(--text); }
+  td.col-author .email { color: var(--text-faint); font-size: 11px; }
+  td.col-date { white-space: nowrap; color: var(--text-dim); }
+  td.col-actions { white-space: nowrap; text-align: right; }
+  .row-actions { display: inline-flex; gap: 4px; }
+  .row-actions .icon-btn { padding: 4px 6px; border-radius: 4px; }
+  .row-actions .icon-btn:hover { background: var(--bg-elev-2); }
+  .row-actions .icon-btn.active.done { color: var(--done); }
+  .row-actions .icon-btn.active.testing { color: var(--testing); }
+  .row-actions .icon-btn.active.test-rule { color: var(--warn); }
+
+  .empty {
+    text-align: center; padding: 60px 20px;
+    color: var(--text-dim);
+  }
+  .empty svg { width: 48px; height: 48px; opacity: 0.4; margin-bottom: 12px; }
+
+  /* Detail modal */
+  .modal-bg {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center;
+    z-index: 100;
+    padding: 20px;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    max-width: 800px; width: 100%;
+    max-height: 90vh; overflow-y: auto;
+    padding: 22px 24px;
+  }
+  .modal h2 { margin: 0 0 14px; font-size: 16px; }
+  .modal-row { margin-bottom: 12px; }
+  .modal-row .k {
+    color: var(--text-dim); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 3px;
+  }
+  .modal-row .v {
+    font-family: var(--mono); font-size: 12.5px;
+    word-break: break-all;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 6px 10px;
+  }
+  .modal-row .v.plain { font-family: inherit; background: none; border: none; padding: 0; }
+  .modal-close {
+    float: right; background: transparent; border: none;
+    color: var(--text-dim); cursor: pointer; font-size: 22px;
+    line-height: 1; padding: 0;
+  }
+  .modal-close:hover { color: var(--text); }
+
+  /* Export modal */
+  .modal.export-modal { max-width: 640px; }
+  .export-intro {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin: 0 0 16px;
+    padding: 8px 12px;
+    background: var(--bg-elev-2);
+    border-radius: 6px;
+    border-left: 3px solid var(--accent-dim);
+  }
+  .export-intro strong { color: var(--text); }
+  .export-options {
+    display: flex; flex-direction: column; gap: 8px;
+    margin-bottom: 16px;
+  }
+  .export-option {
+    display: flex; align-items: flex-start; gap: 14px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    text-align: left;
+    color: var(--text);
+    font-family: inherit;
+    transition: background 0.12s, border-color 0.12s, transform 0.05s;
+  }
+  .export-option:hover {
+    background: var(--bg-elev);
+    border-color: var(--border-strong);
+  }
+  html[data-theme="light"] .export-option:hover { background: #e9edf3; }
+  .export-option:active { transform: scale(0.995); }
+  .opt-icon {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: grid; place-items: center;
+    color: var(--accent);
+  }
+  .opt-icon svg { width: 18px; height: 18px; }
+  .opt-body { flex: 1; min-width: 0; }
+  .opt-title {
+    font-size: 14px; font-weight: 600;
+    margin-bottom: 2px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .opt-default {
+    background: rgba(74,222,128,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(74,222,128,0.3);
+    font-size: 10px; font-weight: 500;
+    padding: 1px 7px; border-radius: 999px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .opt-warn {
+    background: rgba(251,191,36,0.12);
+    color: var(--warn);
+    border: 1px solid rgba(251,191,36,0.3);
+    font-size: 10px; font-weight: 500;
+    padding: 1px 7px; border-radius: 999px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .opt-desc {
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .export-toggles {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .export-toggles .toggles-section {
+    margin-bottom: 14px;
+  }
+  .export-toggles .toggles-section:last-child { margin-bottom: 0; }
+  .export-toggles .toggles-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .export-toggles .ck {
+    display: flex; align-items: flex-start; gap: 8px;
+    cursor: pointer; font-size: 13px;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .export-toggles .ck:last-child { margin-bottom: 0; }
+  .export-toggles .ck input { accent-color: var(--accent); margin-top: 3px; }
+  .export-toggles .ck .hint {
+    color: var(--text-faint); font-size: 12px;
+    font-weight: 400; margin-left: 4px;
+  }
+  .export-toggles .ck.danger { color: var(--danger); }
+  .export-toggles .ck.danger .hint { color: rgba(248,113,113,0.7); }
+
+  .footer {
+    margin-top: 30px; padding-top: 18px;
+    border-top: 1px solid var(--border);
+    color: var(--text-faint); font-size: 12px;
+    text-align: center;
+  }
+
+  @media (max-width: 900px) {
+    .wrap { padding: 14px; }
+    td.col-author, th.col-author, td.col-date, th.col-date { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <path d="M9 12l2 2 4-4"/>
+      </svg>
+    </div>
+    <div class="title">
+      <h1>Gitleaks Viewer</h1>
+      <p>Local triage UI for gitleaks JSON · paste, filter, mark fixed</p>
+    </div>
+    <div class="header-actions">
+      <div class="tab-bar" role="tablist">
+        <button class="tab-btn active" data-tab="howto" role="tab" title="How to generate the report">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          How-to
+        </button>
+        <button class="tab-btn active" data-tab="import" role="tab" title="Import a Gitleaks JSON report">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Import
+          <span class="tab-dot" id="importDot" style="display:none"></span>
+        </button>
+        <button class="tab-btn" data-tab="review" role="tab" id="reviewTab" disabled title="Review findings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z"/></svg>
+          Review
+          <span class="tab-count" id="reviewCount" style="display:none">0</span>
+        </button>
+        <button class="tab-btn" data-tab="export" role="tab" id="exportTab" disabled title="Export report">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export
+        </button>
+      </div>
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- (tabs moved to header) -->
+
+  <div class="tab-panel active" data-panel="howto">
+  <div class="howto" style="display:block;">
+    <div class="howto-body" style="margin-top:0">
+      <h3 style="margin:0 0 10px;font-size:15px;">How to generate a Gitleaks JSON report</h3>
+      <p>Run gitleaks against your repo and export the report in JSON format. Use <code>detect</code> for a clean tree scan, or scan the full git history (recommended for finding committed secrets):</p>
+      <pre># scan working directory
+gitleaks detect --source . --report-format json --report-path leaks.json --no-banner
+
+# scan full git history (recommended)
+gitleaks detect --source . --log-opts="--all" --report-format json --report-path leaks.json --no-banner
+
+# scan a specific branch / from a commit
+gitleaks detect --source . --log-opts="main..HEAD" --report-format json --report-path leaks.json</pre>
+      <p>Then switch to the <strong>Import</strong> tab and drop <code>leaks.json</code> or paste its contents.</p>
+      <div class="links">
+        <a href="https://github.com/gitleaks/gitleaks" target="_blank" rel="noopener">github.com/gitleaks/gitleaks</a>
+        <a href="https://github.com/gitleaks/gitleaks#installing" target="_blank" rel="noopener">Install gitleaks</a>
+        <a href="https://github.com/gitleaks/gitleaks/blob/master/README.md#configuration" target="_blank" rel="noopener">Config & rules</a>
+        <a href="https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml" target="_blank" rel="noopener">Default ruleset</a>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <div class="tab-panel active" data-panel="import">
+  <div class="input-card" style="display:block;">
+    <div class="input-card-body">
+    <div class="input-row">
+      <span class="label">Load report:</span>
+      <button class="btn btn-primary" id="btnImport">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Import JSON file
+      </button>
+      <input type="file" id="fileInput" class="file-input" accept=".json,application/json">
+      <button class="btn" id="btnParse">Parse pasted JSON</button>
+      <button class="btn" id="btnClear">Clear</button>
+      <button class="btn btn-danger" id="btnReset" title="Wipes all your local fix/test marks for current report">Reset marks</button>
+    </div>
+    <textarea id="jsonInput" placeholder='Paste the contents of leaks.json here, or click "Import JSON file"...'></textarea>
+    <div class="parse-msg" id="parseMsg"></div>
+    </div>
+  </div>
+  </div>
+
+  <div class="tab-panel" data-panel="review">
+  <div id="resultsArea" style="display:none;">
+
+    <div class="stats" id="stats"></div>
+
+    <div class="filters">
+      <input type="text" id="searchInput" placeholder="Search file, secret, author, commit, message...">
+      <select id="ruleFilter">
+        <option value="">All rules</option>
+      </select>
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="open">Open only</option>
+        <option value="fixed">Fixed only</option>
+        <option value="test">Test/false-positive only</option>
+      </select>
+      <label class="ck"><input type="checkbox" id="hideTestRules"> Hide test/false-positive</label>
+      <label class="ck"><input type="checkbox" id="hideFixed"> Hide fixed</label>
+      <label class="ck"><input type="checkbox" id="hideAllSecrets" checked> Hide all secrets by default</label>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="RuleID" class="col-rule">Rule <span class="sort-ind"></span></th>
+            <th data-sort="File" class="col-file">File · Location <span class="sort-ind"></span></th>
+            <th class="col-secret">Secret</th>
+            <th data-sort="Author" class="col-author">Author <span class="sort-ind"></span></th>
+            <th data-sort="Date" class="col-date">Date <span class="sort-ind"></span></th>
+            <th class="col-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty" id="emptyState" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <div>No findings match your filters.</div>
+      </div>
+    </div>
+  </div>
+  </div><!-- /tab-panel review -->
+
+  <div class="footer">
+    All data stays in your browser. Marks (fixed / test) are stored in localStorage keyed by fingerprint.
+  </div>
+</div>
+
+<!-- Detail modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modal">
+    <button class="modal-close" id="modalClose" aria-label="Close">&times;</button>
+    <h2 id="modalTitle">Finding details</h2>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<!-- Export modal -->
+<div class="modal-bg" id="exportModalBg">
+  <div class="modal export-modal" id="exportModal">
+    <button class="modal-close" id="exportModalClose" aria-label="Close">&times;</button>
+    <h2>
+      <svg style="vertical-align:-3px" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export report
+    </h2>
+    <p class="export-intro" id="exportIntro"></p>
+
+    <div class="export-options">
+      <button class="export-option" id="btnExportHtml">
+        <div class="opt-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="opt-body">
+          <div class="opt-title">HTML <span class="opt-default">recommended</span></div>
+          <div class="opt-desc">Standalone styled report — same look as the table. Open in any browser, easy to share or archive.</div>
+        </div>
+      </button>
+
+      <button class="export-option" id="btnExportCsv">
+        <div class="opt-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+        </div>
+        <div class="opt-body">
+          <div class="opt-title">CSV</div>
+          <div class="opt-desc">Excel-friendly, UTF-8 with BOM. All fields per row including status, rule, file, secret, author, commit.</div>
+        </div>
+      </button>
+
+      <button class="export-option" id="btnExportPdf">
+        <div class="opt-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><polyline points="14 2 14 8 20 8"/><path d="M9 13h1a2 2 0 0 1 0 4H9zM14 13h2M14 17h2M14 13v4"/></svg>
+        </div>
+        <div class="opt-body">
+          <div class="opt-title">PDF</div>
+          <div class="opt-desc">Opens a print preview in a new tab — choose "Save as PDF" from your system print dialog.</div>
+        </div>
+      </button>
+
+      <button class="export-option" id="btnExportJson">
+        <div class="opt-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3"/></svg>
+        </div>
+        <div class="opt-body">
+          <div class="opt-title">JSON (visible)</div>
+          <div class="opt-desc">Currently visible findings only, with your status marks attached. Wrapped with metadata.</div>
+        </div>
+      </button>
+
+      <button class="export-option" id="btnExportFullJson">
+        <div class="opt-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M8 6v12M16 6v12"/></svg>
+        </div>
+        <div class="opt-body">
+          <div class="opt-title">Full JSON <span class="opt-warn">all findings</span></div>
+          <div class="opt-desc">Every finding regardless of filters, with marks attached. Useful for handing off complete data to teammates.</div>
+        </div>
+      </button>
+    </div>
+
+    <div class="export-toggles">
+      <div class="toggles-section">
+        <div class="toggles-title">Scope</div>
+        <label class="ck">
+          <input type="checkbox" id="exportHideTest">
+          <span>Hide test / false-positive</span>
+          <span class="hint">— exclude findings you marked as test/FP</span>
+        </label>
+        <label class="ck">
+          <input type="checkbox" id="exportHideFixed">
+          <span>Hide fixed</span>
+          <span class="hint">— exclude findings you marked as fixed</span>
+        </label>
+      </div>
+      <div class="toggles-section">
+        <div class="toggles-title">Sensitivity</div>
+        <label class="ck warn-toggle" id="includeSecretsLabel">
+          <input type="checkbox" id="includeSecrets">
+          <span>Include real secret values</span>
+          <span class="hint">— off by default; secrets are masked. Turning on writes raw credentials to the file.</span>
+        </label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // -------- State --------
+  let findings = [];           // raw findings, plus _marks added
+  let sortKey = 'Date';
+  let sortDir = 'desc';        // 'asc' | 'desc'
+  let revealed = new Set();    // fingerprints with secret revealed
+  const STORAGE_KEY = 'gitleaks_viewer_marks_v1';
+  const THEME_KEY = 'gitleaks_viewer_theme_v1';
+
+  // -------- Theme --------
+  function applyTheme(theme) {
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }
+  function loadTheme() {
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch(e) {}
+    // Respect system preference on first visit
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
+    return 'dark';
+  }
+  function saveTheme(t) {
+    try { localStorage.setItem(THEME_KEY, t); } catch(e) {}
+  }
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const next = cur === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    saveTheme(next);
+  }
+  // Apply immediately
+  applyTheme(loadTheme());
+
+  // -------- Storage --------
+  function loadMarks() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+    catch(e) { return {}; }
+  }
+  function saveMarks(marks) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(marks)); }
+    catch(e) { /* quota or disabled */ }
+  }
+  function getMark(fp) {
+    const all = loadMarks();
+    return all[fp] || { fixed: false, test: false };
+  }
+  function setMark(fp, partial) {
+    const all = loadMarks();
+    all[fp] = Object.assign({ fixed: false, test: false }, all[fp] || {}, partial);
+    saveMarks(all);
+  }
+
+  // -------- Utils --------
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  function fmtDate(d) {
+    if (!d) return '';
+    const dt = new Date(d);
+    if (isNaN(dt)) return d;
+    return dt.toISOString().slice(0, 10);
+  }
+  function maskSecret(s) {
+    if (!s) return '';
+    if (s.length <= 8) return '•'.repeat(s.length);
+    return s.slice(0, 3) + '•'.repeat(Math.min(20, s.length - 6)) + s.slice(-3);
+  }
+  function truncate(s, n) {
+    if (!s) return '';
+    return s.length > n ? s.slice(0, n) + '…' : s;
+  }
+
+  // -------- Parsing --------
+  function parseInput(text) {
+    const msg = document.getElementById('parseMsg');
+    msg.textContent = ''; msg.className = 'parse-msg';
+    if (!text || !text.trim()) {
+      msg.textContent = 'No JSON provided.';
+      msg.className = 'parse-msg err';
+      return;
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      msg.textContent = 'Failed to parse JSON: ' + e.message;
+      msg.className = 'parse-msg err';
+      return;
+    }
+    if (!Array.isArray(data)) {
+      // gitleaks usually outputs an array; allow {"findings":[...]} too
+      if (data && Array.isArray(data.findings)) data = data.findings;
+      else {
+        msg.textContent = 'Expected a JSON array of findings (gitleaks output).';
+        msg.className = 'parse-msg err';
+        return;
+      }
+    }
+    findings = data.map((f, i) => {
+      // ensure stable fingerprint even if missing
+      const fp = f.Fingerprint || (f.Commit + ':' + f.File + ':' + f.RuleID + ':' + f.StartLine) || ('idx-' + i);
+      return Object.assign({}, f, { _fp: fp });
+    });
+    msg.textContent = 'Loaded ' + findings.length + ' finding' + (findings.length === 1 ? '' : 's') + '.';
+    msg.className = 'parse-msg ok';
+    document.getElementById('resultsArea').style.display = '';
+    populateRuleFilter();
+    render();
+    // Enable Review and Export tabs, switch to Review
+    document.getElementById('reviewTab').disabled = false;
+    document.getElementById('exportTab').disabled = false;
+    const rc = document.getElementById('reviewCount');
+    rc.textContent = findings.length;
+    rc.style.display = '';
+    document.getElementById('importDot').style.display = '';
+    activateTab('review');
+  }
+
+  // -------- Filtering / sorting --------
+  function populateRuleFilter() {
+    const sel = document.getElementById('ruleFilter');
+    const cur = sel.value;
+    const rules = Array.from(new Set(findings.map(f => f.RuleID))).sort();
+    sel.innerHTML = '<option value="">All rules (' + findings.length + ')</option>' +
+      rules.map(r => {
+        const count = findings.filter(f => f.RuleID === r).length;
+        return '<option value="' + escapeHtml(r) + '">' + escapeHtml(r) + ' (' + count + ')</option>';
+      }).join('');
+    if (cur) sel.value = cur;
+  }
+
+  function getFiltered() {
+    const q = document.getElementById('searchInput').value.trim().toLowerCase();
+    const rule = document.getElementById('ruleFilter').value;
+    const status = document.getElementById('statusFilter').value;
+    const hideTest = document.getElementById('hideTestRules').checked;
+    const hideFixed = document.getElementById('hideFixed').checked;
+
+    let list = findings.slice();
+    if (rule) list = list.filter(f => f.RuleID === rule);
+    if (q) {
+      list = list.filter(f => {
+        const hay = [f.RuleID, f.File, f.Secret, f.Match, f.Author, f.Email, f.Commit, f.Message, f.Description]
+          .map(x => (x == null ? '' : String(x).toLowerCase())).join(' ');
+        return hay.indexOf(q) !== -1;
+      });
+    }
+    list = list.filter(f => {
+      const m = getMark(f._fp);
+      if (hideTest && m.test) return false;
+      if (hideFixed && m.fixed) return false;
+      if (status === 'open' && (m.fixed || m.test)) return false;
+      if (status === 'fixed' && !m.fixed) return false;
+      if (status === 'test' && !m.test) return false;
+      return true;
+    });
+
+    list.sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (av == null) av = '';
+      if (bv == null) bv = '';
+      if (sortKey === 'Date') {
+        av = new Date(av).getTime() || 0;
+        bv = new Date(bv).getTime() || 0;
+      } else {
+        av = String(av).toLowerCase();
+        bv = String(bv).toLowerCase();
+      }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }
+
+  // -------- Render --------
+  function render() {
+    renderStats();
+    const list = getFiltered();
+    const tbody = document.getElementById('tbody');
+    const empty = document.getElementById('emptyState');
+    const hideAll = document.getElementById('hideAllSecrets').checked;
+
+    if (!list.length) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+    } else {
+      empty.style.display = 'none';
+      tbody.innerHTML = list.map(f => renderRow(f, hideAll)).join('');
+    }
+
+    // Sort indicators
+    document.querySelectorAll('thead th[data-sort]').forEach(th => {
+      const ind = th.querySelector('.sort-ind');
+      if (th.getAttribute('data-sort') === sortKey) {
+        ind.textContent = sortDir === 'asc' ? '▲' : '▼';
+      } else {
+        ind.textContent = '';
+      }
+    });
+
+    // Update export modal intro (in case modal is open)
+    const ei = document.getElementById('exportIntro');
+    if (ei) {
+      ei.innerHTML = 'About to export <strong>' + list.length + '</strong> visible finding' +
+        (list.length === 1 ? '' : 's') + ' (out of ' + findings.length + ' total). ' +
+        'Filters and hidden marks are respected. Pick a format below.';
+    }
+  }
+
+  function renderRow(f, hideAll) {
+    const fp = f._fp;
+    const mark = getMark(fp);
+    const isRevealed = revealed.has(fp) && !hideAll ? true : revealed.has(fp);
+    // hideAll forces hidden unless user toggled this specific row to revealed AFTER hideAll was on:
+    // simpler: hideAll just sets default; per-row reveal still wins.
+    const showSecret = revealed.has(fp);
+    const secret = f.Secret || '';
+    const secretDisplay = showSecret ? secret : maskSecret(secret);
+
+    const ruleClass = (f.RuleID || '').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+    const rowClasses = [];
+    if (mark.fixed) rowClasses.push('done');
+    if (mark.test) rowClasses.push('testing');
+
+    const fileLink = f.Link
+      ? '<a href="' + escapeHtml(f.Link) + '" target="_blank" rel="noopener">' + escapeHtml(f.File) + '</a>'
+      : '<span class="file-path">' + escapeHtml(f.File) + '</span>';
+
+    const lineInfo = f.StartLine
+      ? (f.EndLine && f.EndLine !== f.StartLine ? 'L' + f.StartLine + '–L' + f.EndLine : 'L' + f.StartLine)
+      : '';
+    const commitShort = f.Commit ? f.Commit.slice(0, 7) : '';
+
+    return '<tr class="' + rowClasses.join(' ') + '" data-fp="' + escapeHtml(fp) + '">' +
+      '<td class="col-rule"><span class="pill ' + escapeHtml(ruleClass) + '">' + escapeHtml(f.RuleID || '?') + '</span></td>' +
+      '<td class="col-file">' +
+        '<div>' + fileLink + '</div>' +
+        '<div class="meta">' + escapeHtml(lineInfo) + (commitShort ? ' · <span class="mono">' + escapeHtml(commitShort) + '</span>' : '') + '</div>' +
+      '</td>' +
+      '<td class="col-secret">' +
+        '<div class="secret-box">' +
+          '<span class="secret-text ' + (showSecret ? '' : 'hidden') + '" title="' + escapeHtml(showSecret ? secret : '(hidden) click eye to reveal') + '">' +
+            escapeHtml(truncate(secretDisplay, 40)) +
+          '</span>' +
+          '<button class="icon-btn js-toggle-secret" data-fp="' + escapeHtml(fp) + '" title="' + (showSecret ? 'Hide' : 'Reveal') + ' secret">' +
+            (showSecret ? eyeOffSvg() : eyeSvg()) +
+          '</button>' +
+          '<button class="icon-btn js-copy-secret" data-fp="' + escapeHtml(fp) + '" title="Copy secret to clipboard">' +
+            copySvg() +
+          '</button>' +
+        '</div>' +
+      '</td>' +
+      '<td class="col-author">' +
+        '<div class="name">' + escapeHtml(f.Author || '') + '</div>' +
+        '<div class="email">' + escapeHtml(f.Email || '') + '</div>' +
+      '</td>' +
+      '<td class="col-date">' + escapeHtml(fmtDate(f.Date)) + '</td>' +
+      '<td class="col-actions">' +
+        '<div class="row-actions">' +
+          '<button class="icon-btn js-details" data-fp="' + escapeHtml(fp) + '" title="View full details">' + infoSvg() + '</button>' +
+          '<button class="icon-btn js-mark-fixed ' + (mark.fixed ? 'active done' : '') + '" data-fp="' + escapeHtml(fp) + '" title="Mark as fixed">' + checkSvg() + '</button>' +
+          '<button class="icon-btn js-mark-test ' + (mark.test ? 'active test-rule' : '') + '" data-fp="' + escapeHtml(fp) + '" title="Mark as test / false-positive">' + flagSvg() + '</button>' +
+        '</div>' +
+      '</td>' +
+    '</tr>';
+  }
+
+  function renderStats() {
+    const stats = document.getElementById('stats');
+    const total = findings.length;
+    const marks = loadMarks();
+    let fixed = 0, test = 0, open = 0;
+    findings.forEach(f => {
+      const m = marks[f._fp] || {};
+      if (m.fixed) fixed++;
+      else if (m.test) test++;
+      else open++;
+    });
+    const ruleCount = new Set(findings.map(f => f.RuleID)).size;
+    const fileCount = new Set(findings.map(f => f.File)).size;
+    stats.innerHTML =
+      stat('Total', total, 'danger') +
+      stat('Open', open, 'danger') +
+      stat('Fixed', fixed, 'done') +
+      stat('Test / FP', test, 'testing') +
+      stat('Rules', ruleCount, '') +
+      stat('Files', fileCount, '');
+  }
+  function stat(lbl, num, cls) {
+    return '<div class="stat ' + cls + '"><div class="num">' + num + '</div><div class="lbl">' + escapeHtml(lbl) + '</div></div>';
+  }
+
+  // -------- Icons --------
+  function eyeSvg()    { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'; }
+  function eyeOffSvg() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'; }
+  function copySvg()   { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'; }
+  function checkSvg()  { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'; }
+  function flagSvg()   { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>'; }
+  function infoSvg()   { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'; }
+
+  // -------- Modal --------
+  function openDetails(fp) {
+    const f = findings.find(x => x._fp === fp);
+    if (!f) return;
+    const body = document.getElementById('modalBody');
+    const showSecret = revealed.has(fp);
+    const fields = [
+      ['Rule', f.RuleID],
+      ['Description', f.Description],
+      ['File', f.File],
+      ['Lines', (f.StartLine || '') + (f.EndLine && f.EndLine !== f.StartLine ? '–' + f.EndLine : '')],
+      ['Columns', (f.StartColumn || '') + '–' + (f.EndColumn || '')],
+      ['Match', f.Match],
+      ['Secret', showSecret ? f.Secret : maskSecret(f.Secret || '')],
+      ['Entropy', f.Entropy],
+      ['Commit', f.Commit],
+      ['Author', (f.Author || '') + (f.Email ? ' <' + f.Email + '>' : '')],
+      ['Date', f.Date],
+      ['Message', f.Message],
+      ['Tags', Array.isArray(f.Tags) ? f.Tags.join(', ') : ''],
+      ['Fingerprint', f.Fingerprint || f._fp]
+    ];
+    let html = '';
+    fields.forEach(([k, v]) => {
+      if (v === '' || v == null) return;
+      html += '<div class="modal-row"><div class="k">' + escapeHtml(k) + '</div><div class="v">' + escapeHtml(String(v)) + '</div></div>';
+    });
+    if (f.Link) {
+      html += '<div class="modal-row"><div class="k">Source link</div><div class="v plain"><a href="' + escapeHtml(f.Link) + '" target="_blank" rel="noopener">' + escapeHtml(f.Link) + '</a></div></div>';
+    }
+    body.innerHTML = html;
+    document.getElementById('modalBg').classList.add('open');
+  }
+  function closeModal() {
+    document.getElementById('modalBg').classList.remove('open');
+  }
+
+  // -------- Export --------
+  function downloadFile(filename, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function tsStamp() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
+           '-' + pad(d.getHours()) + pad(d.getMinutes());
+  }
+  function statusOf(mark) {
+    if (mark.fixed) return 'Fixed';
+    if (mark.test) return 'Test/FP';
+    return 'Open';
+  }
+  function exportSecret(f, includeReal) {
+    if (includeReal) return f.Secret || '';
+    return maskSecret(f.Secret || '');
+  }
+
+  // CSV
+  function csvEscape(v) {
+    if (v == null) return '';
+    const s = String(v);
+    if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+  function exportCSV() {
+    const list = getFiltered();
+    const includeReal = document.getElementById('includeSecrets').checked;
+    const headers = ['Status', 'Rule', 'Description', 'File', 'StartLine', 'EndLine',
+                     'Secret', 'Match', 'Entropy', 'Commit', 'Author', 'Email',
+                     'Date', 'Message', 'Link', 'Fingerprint'];
+    const rows = [headers.join(',')];
+    list.forEach(f => {
+      const m = getMark(f._fp);
+      rows.push([
+        statusOf(m), f.RuleID, f.Description, f.File, f.StartLine, f.EndLine,
+        exportSecret(f, includeReal), f.Match, f.Entropy, f.Commit, f.Author, f.Email,
+        f.Date, f.Message, f.Link, f.Fingerprint || f._fp
+      ].map(csvEscape).join(','));
+    });
+    // UTF-8 BOM helps Excel detect encoding
+    const csv = '\uFEFF' + rows.join('\r\n');
+    downloadFile('gitleaks-report-' + tsStamp() + '.csv', csv, 'text/csv;charset=utf-8');
+  }
+
+  // JSON (filtered visible, with marks)
+  function exportJSON() {
+    const list = getFiltered();
+    const includeReal = document.getElementById('includeSecrets').checked;
+    const out = list.map(f => {
+      const m = getMark(f._fp);
+      const o = Object.assign({}, f);
+      delete o._fp;
+      if (!includeReal) {
+        o.Secret = maskSecret(f.Secret || '');
+        o.Match = o.Match ? maskSecret(o.Match) : o.Match;
+      }
+      o._status = statusOf(m);
+      o._mark = m;
+      return o;
+    });
+    const wrapper = {
+      generatedAt: new Date().toISOString(),
+      tool: 'gitleaks-viewer',
+      visibleCount: out.length,
+      totalCount: findings.length,
+      includesRealSecrets: includeReal,
+      findings: out
+    };
+    downloadFile('gitleaks-visible-' + tsStamp() + '.json',
+                 JSON.stringify(wrapper, null, 2), 'application/json');
+  }
+
+  // Full original JSON (all findings, with marks attached)
+  function exportFullJSON() {
+    const includeReal = document.getElementById('includeSecrets').checked;
+    if (!includeReal) {
+      const ok = confirm('"Include real secret values" is OFF. Export full JSON with masked secrets?\n\nClick Cancel and toggle it on if you need the original raw secrets (be careful sharing this file).');
+      if (!ok) return;
+    }
+    const out = findings.map(f => {
+      const m = getMark(f._fp);
+      const o = Object.assign({}, f);
+      delete o._fp;
+      if (!includeReal) {
+        o.Secret = maskSecret(f.Secret || '');
+        o.Match = o.Match ? maskSecret(o.Match) : o.Match;
+      }
+      o._status = statusOf(m);
+      o._mark = m;
+      return o;
+    });
+    downloadFile('gitleaks-full-' + tsStamp() + '.json',
+                 JSON.stringify(out, null, 2), 'application/json');
+  }
+
+  // HTML report — standalone, mirrors table styling
+  function buildReportRowsHTML(list, includeReal) {
+    return list.map(f => {
+      const m = getMark(f._fp);
+      const ruleClass = (f.RuleID || '').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+      const rowClasses = [];
+      if (m.fixed) rowClasses.push('done');
+      if (m.test) rowClasses.push('testing');
+      const fileLink = f.Link
+        ? '<a href="' + escapeHtml(f.Link) + '" target="_blank" rel="noopener">' + escapeHtml(f.File) + '</a>'
+        : '<span>' + escapeHtml(f.File) + '</span>';
+      const lineInfo = f.StartLine
+        ? (f.EndLine && f.EndLine !== f.StartLine ? 'L' + f.StartLine + '–L' + f.EndLine : 'L' + f.StartLine)
+        : '';
+      const commitShort = f.Commit ? f.Commit.slice(0, 7) : '';
+      const secret = exportSecret(f, includeReal);
+      const status = statusOf(m);
+      const statusClass = status.toLowerCase().replace(/[^a-z]/g, '');
+      return '<tr class="' + rowClasses.join(' ') + '">' +
+        '<td><span class="status status-' + statusClass + '">' + status + '</span></td>' +
+        '<td><span class="pill ' + escapeHtml(ruleClass) + '">' + escapeHtml(f.RuleID || '?') + '</span></td>' +
+        '<td><div>' + fileLink + '</div><div class="meta">' + escapeHtml(lineInfo) + (commitShort ? ' · <span class="mono">' + escapeHtml(commitShort) + '</span>' : '') + '</div></td>' +
+        '<td><code>' + escapeHtml(truncate(secret, 80)) + '</code></td>' +
+        '<td><div>' + escapeHtml(f.Author || '') + '</div><div class="meta">' + escapeHtml(f.Email || '') + '</div></td>' +
+        '<td>' + escapeHtml(fmtDate(f.Date)) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+  function buildReportHTML(list, includeReal, forPrint) {
+    const marks = loadMarks();
+    let fixed = 0, test = 0, open = 0;
+    findings.forEach(f => {
+      const mm = marks[f._fp] || {};
+      if (mm.fixed) fixed++;
+      else if (mm.test) test++;
+      else open++;
+    });
+    const generated = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+    const css = `
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 30px; background: #fff; color: #111;
+             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+             font-size: 13px; line-height: 1.5; }
+      h1 { margin: 0 0 4px; font-size: 22px; }
+      .sub { color: #555; font-size: 12px; margin-bottom: 18px; }
+      .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+      .stat { border: 1px solid #ddd; border-radius: 6px; padding: 8px 12px; min-width: 100px; }
+      .stat .num { font-size: 18px; font-weight: 600; }
+      .stat .lbl { font-size: 10.5px; color: #666; text-transform: uppercase; letter-spacing: 0.4px; }
+      .stat.danger .num { color: #c0392b; }
+      .stat.done .num { color: #16a34a; }
+      .stat.testing .num { color: #7c3aed; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      thead th { background: #f4f6f8; text-align: left; padding: 8px 10px;
+                 font-weight: 600; font-size: 11px; text-transform: uppercase;
+                 letter-spacing: 0.4px; color: #555; border-bottom: 2px solid #ddd; }
+      tbody td { padding: 9px 10px; border-bottom: 1px solid #eee; vertical-align: top;
+                 word-break: break-word; }
+      tbody tr.done { opacity: 0.55; }
+      tbody tr.done td:nth-child(4) { text-decoration: line-through; }
+      tbody tr.testing { background: #faf7ff; }
+      .pill { display: inline-block; padding: 2px 7px; border-radius: 999px;
+              font-size: 10.5px; font-weight: 500; background: #fde7e7; color: #b91c1c;
+              border: 1px solid rgba(185,28,28,0.25); white-space: nowrap; }
+      .pill.private-key { background: #fdd; color: #991b1b; }
+      .pill.curl-auth-header { background: #e0eaff; color: #1e40af; border-color: rgba(30,64,175,0.25); }
+      .status { display: inline-block; padding: 2px 8px; border-radius: 4px;
+                font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+                letter-spacing: 0.3px; }
+      .status-open { background: #fee; color: #b91c1c; }
+      .status-fixed { background: #e7f7ec; color: #15803d; }
+      .status-testfp { background: #efe7fb; color: #6d28d9; }
+      .meta { color: #888; font-size: 10.5px; margin-top: 2px; }
+      code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; }
+      a { color: #1e40af; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .footer { margin-top: 18px; color: #888; font-size: 11px; text-align: center;
+                border-top: 1px solid #eee; padding-top: 12px; }
+      .warn { background: #fff8e1; border: 1px solid #f5d97a; color: #8a6d00;
+              padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 12px; }
+      @media print {
+        body { padding: 16px; }
+        thead { display: table-header-group; }
+        tr { page-break-inside: avoid; }
+      }
+    `;
+    const visibleCount = list.length;
+    return '<!DOCTYPE html>\n<html lang="en"><head>' +
+      '<meta charset="UTF-8">' +
+      '<title>Gitleaks Report — ' + escapeHtml(generated) + '</title>' +
+      '<style>' + css + '</style>' +
+      '</head><body>' +
+      '<h1>Gitleaks Findings Report</h1>' +
+      '<div class="sub">Generated ' + escapeHtml(generated) +
+        ' · Showing ' + visibleCount + ' of ' + findings.length + ' findings' +
+        ' · Secrets ' + (includeReal ? '<strong style="color:#b91c1c">included (raw values)</strong>' : 'masked') +
+      '</div>' +
+      (includeReal ? '<div class="warn">⚠ This report contains real secret values. Treat it as confidential — encrypt before sharing and rotate any credentials still in use.</div>' : '') +
+      '<div class="stats">' +
+        '<div class="stat danger"><div class="num">' + visibleCount + '</div><div class="lbl">Visible</div></div>' +
+        '<div class="stat danger"><div class="num">' + open + '</div><div class="lbl">Open</div></div>' +
+        '<div class="stat done"><div class="num">' + fixed + '</div><div class="lbl">Fixed</div></div>' +
+        '<div class="stat testing"><div class="num">' + test + '</div><div class="lbl">Test / FP</div></div>' +
+      '</div>' +
+      '<table>' +
+        '<thead><tr>' +
+          '<th>Status</th><th>Rule</th><th>File · Location</th>' +
+          '<th>Secret</th><th>Author</th><th>Date</th>' +
+        '</tr></thead>' +
+        '<tbody>' + buildReportRowsHTML(list, includeReal) + '</tbody>' +
+      '</table>' +
+      '<div class="footer">Generated by gitleaks-viewer · local-only triage tool</div>' +
+      (forPrint ? '<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},300);});<\/script>' : '') +
+      '</body></html>';
+  }
+  function exportHTML() {
+    const list = getFiltered();
+    const includeReal = document.getElementById('includeSecrets').checked;
+    if (includeReal) {
+      const ok = confirm('Export HTML report including real secret values?\n\nThe file will contain unmasked credentials. Make sure you handle it securely (encrypt before sharing, rotate any live credentials).');
+      if (!ok) return;
+    }
+    const html = buildReportHTML(list, includeReal, false);
+    downloadFile('gitleaks-report-' + tsStamp() + '.html', html, 'text/html;charset=utf-8');
+  }
+  function exportPDF() {
+    const list = getFiltered();
+    const includeReal = document.getElementById('includeSecrets').checked;
+    if (includeReal) {
+      const ok = confirm('Export PDF including real secret values?\n\nA print window will open — pick "Save as PDF". Treat the file as confidential.');
+      if (!ok) return;
+    }
+    const html = buildReportHTML(list, includeReal, true);
+    const w = window.open('', '_blank');
+    if (!w) {
+      alert('Popup blocked. Please allow popups for this page to export PDF.');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }
+
+  // Highlight the secrets toggle when armed, so users notice
+  function refreshIncludeSecretsStyle() {
+    const lbl = document.getElementById('includeSecretsLabel');
+    const cb = document.getElementById('includeSecrets');
+    if (cb.checked) lbl.classList.add('danger');
+    else lbl.classList.remove('danger');
+  }
+
+  // -------- Events --------
+  document.getElementById('btnImport').addEventListener('click', () => {
+    document.getElementById('fileInput').click();
+  });
+  document.getElementById('fileInput').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      document.getElementById('jsonInput').value = ev.target.result;
+      parseInput(ev.target.result);
+    };
+    reader.readAsText(f);
+  });
+  document.getElementById('btnParse').addEventListener('click', () => {
+    parseInput(document.getElementById('jsonInput').value);
+  });
+  document.getElementById('btnClear').addEventListener('click', () => {
+    document.getElementById('jsonInput').value = '';
+    document.getElementById('parseMsg').textContent = '';
+    findings = [];
+    revealed.clear();
+    document.getElementById('resultsArea').style.display = 'none';
+    document.getElementById('fileInput').value = '';
+    document.getElementById('reviewTab').disabled = true;
+    document.getElementById('exportTab').disabled = true;
+    document.getElementById('reviewCount').style.display = 'none';
+    document.getElementById('importDot').style.display = 'none';
+    activateTab('howto');
+    // Re-show import panel too (multi-active default)
+    document.querySelector('.tab-btn[data-tab="import"]').classList.add('active');
+    document.querySelector('.tab-panel[data-panel="import"]').classList.add('active');
+  });
+  document.getElementById('btnReset').addEventListener('click', () => {
+    if (!confirm('Wipe all your local fix/test marks? This affects all reports loaded in this browser.')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    render();
+  });
+
+  // Filter / search
+  ['searchInput', 'ruleFilter', 'statusFilter', 'hideTestRules', 'hideFixed', 'hideAllSecrets'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('input', render);
+    el.addEventListener('change', render);
+  });
+
+  // Export buttons
+  document.getElementById('btnExportHtml').addEventListener('click', exportHTML);
+  document.getElementById('btnExportCsv').addEventListener('click', exportCSV);
+  document.getElementById('btnExportPdf').addEventListener('click', exportPDF);
+  document.getElementById('btnExportJson').addEventListener('click', exportJSON);
+  document.getElementById('btnExportFullJson').addEventListener('click', exportFullJSON);
+  document.getElementById('includeSecrets').addEventListener('change', refreshIncludeSecretsStyle);
+
+  // Sort
+  document.querySelectorAll('thead th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const k = th.getAttribute('data-sort');
+      if (sortKey === k) sortDir = (sortDir === 'asc' ? 'desc' : 'asc');
+      else { sortKey = k; sortDir = 'asc'; }
+      render();
+    });
+  });
+
+  // Row delegation
+  document.getElementById('tbody').addEventListener('click', e => {
+    const t = e.target.closest('button');
+    if (!t) return;
+    const fp = t.getAttribute('data-fp');
+    if (!fp) return;
+    if (t.classList.contains('js-toggle-secret')) {
+      if (revealed.has(fp)) revealed.delete(fp); else revealed.add(fp);
+      render();
+    } else if (t.classList.contains('js-copy-secret')) {
+      const f = findings.find(x => x._fp === fp);
+      if (f && f.Secret) {
+        navigator.clipboard?.writeText(f.Secret).then(() => {
+          t.title = 'Copied!';
+          setTimeout(() => { t.title = 'Copy secret to clipboard'; }, 1200);
+        }).catch(() => { alert('Clipboard write blocked.'); });
+      }
+    } else if (t.classList.contains('js-mark-fixed')) {
+      const m = getMark(fp);
+      setMark(fp, { fixed: !m.fixed, test: false });
+      render();
+    } else if (t.classList.contains('js-mark-test')) {
+      const m = getMark(fp);
+      setMark(fp, { test: !m.test, fixed: false });
+      render();
+    } else if (t.classList.contains('js-details')) {
+      openDetails(fp);
+    }
+  });
+
+  // Modal
+  document.getElementById('modalClose').addEventListener('click', closeModal);
+  document.getElementById('modalBg').addEventListener('click', e => {
+    if (e.target.id === 'modalBg') closeModal();
+  });
+
+  // Tabs
+  function activateTab(name) {
+    // Single-active mode: clicking a tab highlights only it and shows only its panel,
+    // EXCEPT on initial load where howto + import are both visible (handled by markup).
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    const tabBtn = document.querySelector('.tab-btn[data-tab="' + name + '"]');
+    const panel = document.querySelector('.tab-panel[data-panel="' + name + '"]');
+    if (tabBtn) tabBtn.classList.add('active');
+    if (panel) panel.classList.add('active');
+    if (name === 'import') {
+      const ta = document.getElementById('jsonInput');
+      if (ta && !ta.value) setTimeout(() => ta.focus(), 50);
+    }
+  }
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      const tab = btn.getAttribute('data-tab');
+      if (tab === 'export') {
+        openExportModal();
+        return;
+      }
+      activateTab(tab);
+    });
+  });
+
+  // Theme toggle
+  document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+  // Initial focus on the textarea since import is open by default
+  setTimeout(() => {
+    const ta = document.getElementById('jsonInput');
+    if (ta) ta.focus();
+  }, 100);
+
+  // Export modal
+  function openExportModal() {
+    // Mirror current filter state into the modal toggles
+    document.getElementById('exportHideTest').checked = document.getElementById('hideTestRules').checked;
+    document.getElementById('exportHideFixed').checked = document.getElementById('hideFixed').checked;
+    // Refresh intro with current visible counts
+    render();
+    document.getElementById('exportModalBg').classList.add('open');
+  }
+
+  // When the user changes scope toggles inside the export modal, mirror them
+  // back to the Review-tab filter checkboxes so getFiltered() uses them and
+  // the Review view stays consistent.
+  function bindExportScopeToggle(modalId, reviewId) {
+    document.getElementById(modalId).addEventListener('change', e => {
+      document.getElementById(reviewId).checked = e.target.checked;
+      render();
+    });
+  }
+  bindExportScopeToggle('exportHideTest', 'hideTestRules');
+  bindExportScopeToggle('exportHideFixed', 'hideFixed');
+  function closeExportModal() {
+    document.getElementById('exportModalBg').classList.remove('open');
+  }
+  document.getElementById('exportModalClose').addEventListener('click', closeExportModal);
+  document.getElementById('exportModalBg').addEventListener('click', e => {
+    if (e.target.id === 'exportModalBg') closeExportModal();
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      closeModal();
+      closeExportModal();
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
